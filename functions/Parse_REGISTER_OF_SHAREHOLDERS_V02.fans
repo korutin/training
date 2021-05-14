@@ -1,0 +1,653 @@
+//Parse_REGISTER_OF_SHAREHOLDERS_V02 (%doc_id:int, %mute:int,  Info: str):int;
+//Распаковка реестра владельцкв из формата   FCDR_2017
+// Список владельцев, Список лиц, имеющих право на получение доходов
+//SVS
+
+uses _f_doc;
+
+var BODY,BODY1, FROM_FACE, TO_FACE, InfoFrom:='';
+var Way;
+var Issuer_List, party_IDs_list,S1;
+var ISSUER_ID,ISS; // Self -ID Идентификационные данные Эмитента/ПИФ/ИСУ/… (лица, обязанноого по ценным бумагам)
+var version;
+var request_doc_num, request_date, RequestList; //Номер  и дата сообщения,  на которое предоставляются данные
+var Request_ID, Request_NUM, Request_D_DATE; //ID, номер и дат   а документа- запроса по системе FANSY
+var issuer_name,  // Кто прислал запрос
+    their_doc_num, // Исходящий номер НРД, присвоенный сообщению с реестром
+    their_doc_date,  //Дата по НРД, присвоенная сообщению с реестром
+    business_service;
+var dl_out_doc_num,dl_out_doc_date,dl_in_doc_num,dl_in_reg_date; // Переменные, возвращаемые из блока doc_link;
+var name_,HOLDER_FACE;
+var R_TYPE, IS_BANKREQ, TMPL, NARRATIVE,add_info,IND, ADD_INFO_LIST;
+
+var OP_ID; // ID операции формирования списка
+var ACCOUNT_NUMBER,ACC_NUM ,ACC_ID;
+var PREF,COMMENT;
+var FV_LIST, LINE;
+var FaceParamList, // список содержащий реквизиты владельца ЦБ?
+    PawnerList,    // список содержащий реквизиты залогодержателя
+    Sec_InfoList,  // список содержащий реквизиты ЦБ
+    ISS_BANK_PROB_RUB_List, //Список с банковскими реквизитами эмитента
+    Ev_LinkageList;     // Список связанных референсов КД, с типом ка чере ";"
+var corp_actn_evt_id, corporate_action_code; // Рефкркнс корпоративного события
+var x_corporate_action_reference,x_request_identification;
+var acc_narrative, acc_dop, acc_issuer,acc_scheme_name; // Номер раскрываемого счета
+
+var x_events_linkage,  ev_corp_actn_evt_id, ev_corporate_action_code;
+var x_header, x_doc_link, x_account_dtls, x_account_holder,x_issuer,x_information_indicator,x_register_list;
+var x_total_security_balance,x_pagination;
+var doc_link_num, doc_link_date,linkage_code,LinkList;
+var message_function;
+
+var FOND, COMPANY,record_date, ACC_TYPE;
+
+var register_list_id, page_total,page, x_add_info, x_XtnsnDt,x_bank_prop_curr;
+var b_shareholder_id,b_ccy_code,b_ow_acc, b_ow_swift,b_ow_acc_n1,b_ow_acc_n2, b_ow_addr1, b_ow_addr2,
+    b_bank_acc_c, b_ow_b_swift, b_ow_bn_n1,b_ow_bn_n2, b_ow_bn_a1, b_ow_bn_a2, b_md_b_swift, b_md_bn_n1, b_md_bn_n2,
+    b_md_bn_a1, b_md_bn_a2, b_add_info;
+var s;
+
+var FROM_NAME;
+var FDOC;
+var SHARE,  total, BLOCK_COUNT, FACT_COUNT;
+
+dl_out_doc_num := '';
+dl_in_doc_num := '';
+dl_in_reg_date:= clear(now);
+dl_out_doc_date:= clear(now);
+var DOCS_LEGAL := Table(code_type str,doc_num str, doc_date date,reg_org str, param_type int, narrative str );
+var counter,k;
+var doc_id;
+
+var AMOUNT_ALL, AMOUNT_OPENED, MUST_OPEN, IS_OPENED, LOADED_AMOUNT, DOL_ID;
+
+var VAL_CODE, P_ACNT, P_SWIFT, P_NAME, P_HOME_ADR,  BANK_ACNT, BANK_SWIFT, BANK_NAME, BANK_ADR,
+    M_BANK_SWIFT, M_BANK_NAME, M_BANK_ADR,  DESTINATION, EXT_FACE;
+
+var ISS_FULL_NAME, ISS_POSTAL_NAME, ISS_MAIL_ADR, ISS_PARTAD_COUNTRY, ISS_PARTAD_INDEX, ISS_PARTAD_ADDRESS,
+    ISS_LEGAL_ADDRESS, ISS_TYPE_LEGADDRESS, ISS_PHONE_FAX, ISS_EMAILS,  ISS_DOC_FACE;
+var shareholder_id_List := List();
+var InfoList := List();
+var WHOS := MyFace;
+//var xtr_FILE :='RS_Open_1.xtr';
+function 'NormalizeB(%s :str):str'
+do
+//ToLat( %s:string )
+// Функция приведения литеральной строки к нормализованно-латинскому виду
+// Все похожие по написанию заглавные кириллические символы заменяют на их аналоги из латтиницы
+// EKS 02.2019
+var s;
+   s := UpperCase(trim(%s));
+    while Pos( #32+#32, s )>0  do  s := Replace( s, #32+#32, #32 )   end;
+    s := UpperCase( s );
+    s := Replace( s, 'А', 'A' );   // замена похожих русских букв на английские
+    s := Replace( s, 'В', 'B' );
+    s := Replace( s, 'С', 'C' );
+    s := Replace( s, 'Е', 'E' );
+    s := Replace( s, 'Н', 'H' );
+    s := Replace( s, 'К', 'K' );
+    s := Replace( s, 'М', 'M' );
+    s := Replace( s, 'О', 'O' );
+    s := Replace( s, 'Р', 'P' );
+    s := Replace( s, 'Т', 'T' );
+    s := Replace( s, 'Х', 'X' );
+    s := Replace( s, 'У', 'Y' );
+    return(s);
+end;
+//==============================================================================
+
+
+  LinkList := List();
+  ADD_INFO_LIST:= List();
+  Info := '';
+  Way := '';
+  ExtractSQL( 'Данные', 'select I.BODY,D.FROM_FACE from D_IN_MESS I left join OD_IN_DOCS D on D.DOC=I.DOC where I.DOC=:D', %doc_id, BODY, FROM_FACE);
+  var tmpl_s, vers;
+//  var x_main:=_Metal_F->XML_Open(BODY,xtr_FILE);
+  var x_main:=_Metal_F->XML_Open(BODY,'');
+
+try
+    //----------------------------------- EKS 16/02/2021 -------
+    tmpl_s:= _F_NXML2->GetDisclosureTemplate( x_main );
+    if isBlank(tmpl_s) then
+        vers := x_main._version;
+    else
+        vers := trim(tmpl_s);
+    end;
+    //Проверяем XML по схеме
+    if not _F_NXML2->XMLCheck(vers, '', BODY,  InfoFrom) then
+       Info := _f_report->Add_Info(Info, InfoFrom);
+      _Metal_F->XML_Close;
+       return(108);   //XML сообщение не соответствует XSD схеме
+    end;
+
+   if Pos('<joint_owners>',BODY) > 0 then
+
+       S1 :=ListGet(BODY,0);
+       _Metal_F->XML_Close;
+
+       BODY1 := _F_NXML2->trXml(BODY);
+       ListDel(BODY1,0);
+       S := S1+ #13+#10 +BODY1;
+       BODY := S;
+       x_main:=_Metal_F->XML_Open(BODY,'');
+
+    end;
+   //   блок (header), в котором указываются номер и дата сообщения. Присваевает НРД
+   //  блок (link), указывается номер и дата документа Регистратора, в ответ на который направляется данное сообщение, при этом в in_doc_num и в  in_reg_date
+   //  date указывается данные регистрации входящего документа, которые присваивает НРД-->
+
+   if (x_main.?version) then
+        VERSION := x_main.?version;
+    else
+        Info := _f_report->Add_Info(Info, 'Обязательный элемент version не обнаружен');
+    end;
+
+    FROM_FACE := TO_FACE := clear(0);
+    if (x_main.?header) then
+        x_header := x_main._header;
+        _F_NXML2->Inp_header_t(x_header, 'header', their_doc_num, their_doc_date, FROM_FACE, TO_FACE, FROM_NAME, InfoFrom);
+            Info := _f_report->Add_Info(Info, InfoFrom);
+        if isNull(FROM_FACE) then
+            Info := _f_report->Add_Info(Info, 'Отправитель, указанный в элементе head, в справочниках системы не обнаружен');
+        end;
+        if isNull(TO_FACE) then
+            Info := _f_report->Add_Info(Info, 'Получатель, указанный в элементе head, в справочниках системы не обнаружен');
+        end;
+    else
+        Info := _f_report->Add_Info(Info, 'Обязательный элемент header не обнаружен');
+    end;
+
+    if (x_main.?business_service) then
+        business_service := x_main._business_service;    //Код формы сообщения (определяет функцию сообщения)
+    end;
+
+   // Что за случай, когда запрос не один?
+   if   x_main.?request_identification then
+      x_request_identification := x_main._request_identification;
+      while not x_request_identification.@eof do
+
+         _F_NXML2->Inp_request_identification_t(x_request_identification, Way, request_doc_num, request_date, issuer_name,InfoFrom);
+         Info:= _f_report->Add_Info(Info, InfoFrom);
+
+         ListAdd(RequestList,request_doc_num +';'+str(request_date)+';'+issuer_name);
+
+         x_request_identification.@next;
+
+      end;
+
+      if not (IsBlank(their_doc_num) or IsBlank(their_doc_date)) then
+
+         ExtractSQL('Данные',[select count(*)  from OD_IN_DOCS where THEIR_NUM = :doc_num and THEIR_DATE =  :doc_date  and FROM_FACE =:FROM_FACE and DOC <> :DOC_ID],their_doc_num, their_doc_date,FROM_FACE, %doc_id,counter);
+         if counter = 0 then
+            ExecSQL( 'Данные',[update OD_IN_DOCS set  THEIR_NUM = :doc_num, THEIR_DATE =  :doc_date,  FROM_FACE =:FROM_FACE  where  DOC=:DOC],their_doc_num, their_doc_date,FROM_FACE, %doc_id);
+            MainForm.UserDic.@commit;
+            MainForm.UserDic.@start;
+
+         else
+             Info := _f_report->Add_Info(Info, 'Документ за номером '+their_doc_num +'  за дату '+their_doc_date  + ' от отправителя ' + FROM_NAME + 'уже был принят');
+         end;
+      end;
+
+   else
+        raise('В сообщении отсутствует блок, идентифицирующий запрос, на основании которого предоставляется список <request_identification>');
+   end;
+  if  x_main.?doc_link then
+      x_doc_link:= x_main._doc_link;
+      while not x_doc_link.@eof do
+
+         _F_NXML2->Inp_Doc_Link_V2_t(x_doc_link,doc_link_num, doc_link_date,linkage_code ,InfoFrom);
+          if ~isBlank(InfoFrom) then
+              Info := _f_report->Add_Info(Info, InfoFrom);
+          else
+             S := doc_link_num+';'+ doc_link_date+';'+ linkage_code;
+             ListAdd(LinkList,S);
+          end;
+         x_doc_link.@next;
+      end;
+  end;
+
+//=============================================================================
+
+
+    //-в блоке issuer указывается  Идентификационные данные Эмитента/ПИФ/ИСУ/… (лица, обязанноого по ценным бумагам) Фонд, в отношении которого направляеться список, при этом указывается два блока
+    // Id в одном указывается реквизиты Фонда (id_type=TMRL), а в другом УК (d_type=OGRN)
+
+    //Inp_Legal_entity_details_t(%ds:int; %Way:str; %DOCS:int; FULL_NAME, POSTAL_NAME, MAIL_ADR, PARTAD_COUNTRY, PARTAD_INDEX, PARTAD_ADDRESS, LEGAL_ADDRESS:str;TYPE_LEGADDRESS:int; PHONE_FAX, EMAILS, BANK_PROB_RUB:List; DOC_FACE:int; Info:str)
+    // -------------------------------------------------------------------------------------------
+    // DOCS          := Table(code_type str,doc_num str, doc_date date,reg_org str, param_type int, narrative str );
+
+  x_issuer:=x_main._issuer;
+  Issuer_List := List();
+  while not x_issuer.@eof do
+      _F_NXML2->Inp_Legal_entity_details_t(x_issuer, '<issuer>', DOCS_LEGAL, ISS_FULL_NAME, ISS_POSTAL_NAME, ISS_MAIL_ADR, ISS_PARTAD_COUNTRY, ISS_PARTAD_INDEX,
+                                       ISS_PARTAD_ADDRESS, ISS_LEGAL_ADDRESS, ISS_TYPE_LEGADDRESS, ISS_PHONE_FAX, ISS_EMAILS,
+                                                          ISS_BANK_PROB_RUB_List, ISS_DOC_FACE, InfoFrom);
+
+     if ~isBlank(InfoFrom) then
+         Info := _f_report->Add_Info(Info, InfoFrom);
+     else
+         DOCS_LEGAL.@FIRST;
+         while not DOCS_LEGAL.@Eof do
+             if DOCS_LEGAL._code_type ='TMRL' then
+                FOND :=   ISS_DOC_FACE;
+                if not IsBlank(ISSUER_ID) then
+                   ISSUER_ID := clear(0);
+                end;
+             elsif DOCS_LEGAL._code_type ='OGRN' then
+                 COMPANY :=   ISS_DOC_FACE;
+             else
+                if IsBlank(FOND) then
+                   ISSUER_ID  :=   ISS_DOC_FACE;
+                end;
+             end;
+           DOCS_LEGAL.@Next;
+         end;
+         // Возвращает ID фонда и УК
+     end;
+      x_issuer.@next;
+  end;
+   //Референс, тип корпоративного действия
+    if x_main.?corporate_action_reference then
+          x_corporate_action_reference := x_main._corporate_action_reference;
+       _F_NXML2->Inp_Corporate_action_reference_V03(x_corporate_action_reference, '<corporate_action_reference>', corp_actn_evt_id, corporate_action_code, InfoFrom);
+        Info := _f_report->Add_Info(Info, InfoFrom);
+    else
+         raise('В сообщении отсутствует блок, идентифицирующий референс  корпоративного действия<corporate_action_reference>');
+    end;
+
+   // Связанный референс и тип корпоративного действия / EventsLinkage
+   //  Как применить надо подумать.  Пока не видно
+   if  x_main.?events_linkage then
+      Ev_LinkageList := List();
+       x_events_linkage:=x_main._events_linkage;
+       while not x_events_linkage.@Eof do
+          _F_NXML2->Inp_Events_linkage_t(x_events_linkage, '<events_linkage>',  ev_corp_actn_evt_id, ev_corporate_action_code, InfoFrom);
+          Info := _f_report->Add_Info(Info, InfoFrom);
+          ListAdd(Ev_LinkageList, ev_corp_actn_evt_id +';'+ev_corporate_action_code);
+          x_events_linkage.@Next;
+       end;
+   end;
+   if  x_main.?record_date then
+      record_date := x_main._record_date;
+   else
+     raise('В сообщении отсутствует блок, идентифицирующий Дату, на момент окончания опердня которой собирается список лиц <record_date>');
+   end;
+
+   if x_main.?message_function then
+      message_function  := x_main._message_function;
+   else
+      raise('В сообщении отсутствует блок Назначение предоставляемой информации <message_function>');
+   end;
+
+
+
+
+  //Номер счета, по которому предоставляется информация. Лицевой счет номинального держателя в реестре
+  if x_main.?account_dtls then
+     x_account_dtls:=x_main._account_dtls;
+     _F_NXML2->Inp_Account_dtls_v04_t(x_account_dtls ,'account_dtls', ACCOUNT_NUMBER, acc_type, acc_narrative, acc_dop, acc_issuer, acc_scheme_name, InfoFrom);
+     Info:= _f_report->Add_Info(Info, InfoFrom);
+  else
+      raise('В сообщении отсутствует блок Раскрываемый счет <account_dtls>');
+  end;
+//=======================================================================================================
+   // Найдем запрос  Будем искать его по эмитенту и дате отсечки  и референсу КД
+   //CA_REFERENCE
+   //R_DATE
+   //ISSUER
+      k := 0;
+      If IsBlank(ISSUER_ID) then
+         ISS := COMPANY;
+      else
+         ISS := ISSUER_ID;
+      end;
+      // Возможно, надо искать документ конкретного отправителя!!!!!
+      for 'Данные' select [Select D.ID, D.NUM, D.D_DATE
+                from OD_DOC_CATS C
+                  left join OD_DOCS D on D.D_CAT=C.ID and D.WHOS=:WHOS
+                  left join OP_FIELDS FCR on FCR.OP=C.ID and FCR.AS_NAME='CA_REFERENCE'
+                  left join OP_FIELDS FRD on FRD.OP=C.ID and FRD.AS_NAME='R_DATE'
+                  left join OP_FIELDS FI on FI.OP=C.ID and FI.AS_NAME='ISSUER'
+                  left join D_OP_VAL VCR on VCR.DOC=D.ID and VCR.DESCR=FCR.ID
+                  left join D_OP_VAL VRD on VRD.DOC=D.ID and VRD.DESCR=FRD.ID
+                  left join D_OP_VAL VI on VI.DOC=D.ID and VI.DESCR=FI.ID
+                where C.SYS_NAME='I_DISCLOSURE_REQ'  and  VCR.VAL=:CAR
+                and f_asDate(VRD.VAL) >=:R_DATE  and f_asDate(VRD.VAL) <:R_DATE_1  and f_asInteger(VI.VAL) =:ISSUER]
+      from  WHOS, corp_actn_evt_id, Date(record_date),Date(record_date)+1, ISS
+      into Request_ID, Request_NUM, Request_D_DATE
+      do
+        inc(k);
+      end;
+     if k = 0 then
+        Info := _f_report->Add_Info(Info, 'В базе данных не найден документ - запрос на раскрытие с номером отправителя '+request_doc_num + ' за дату '+ str(request_date));
+        Info := _f_report->Add_Info(Info, 'корпоративное действие  '+corp_actn_evt_id + ' дата снятия остатков '+ str(request_date));
+        raise(info);
+
+     elsif k > 1  then
+        Info := _f_report->Add_Info(Info, 'В базе данных  найдено  несколько документов - запросов на раскрытие с номером отправителя '+request_doc_num + ' за дату '+ str(request_date));
+        raise(info);
+     else
+        dummy;
+     end;
+
+
+
+
+//=======================================================================================================
+   // Ищем операцию фомрирования списка лиц, привязанную к запросу и с заданным номером счета для раскрытия
+   // Операции в ДЕПО и РЕЕСТР имеют разные SYS_NAME категорий!!! НАДО ПРОПИСАТЬ
+   OP_ID := Clear(0);
+
+   for 'Данные' select [SELECT D.ID,  CL.NUMBER,R2.DEPO_2
+   FROM OD_DOC_CATS  C
+   left join OD_DOCS D on D.D_CAT=C.ID and C.SYS_NAME ='OP_INF_REESTR'
+   left join OD_DOC_STATES S on S.id =d.STATE
+   left join OD_DOLS DD on  DD.DOC = d.ID  and DD.FOOTER= 2
+   left join  U_OP_INF_REESTR_DOL2 R2 on R2.DOL = DD.ID
+   left join OD_CLIENTS CL on CL.ID = f_AsInteger(R2.DEPO_2)
+   where d.KVIT =:ID and S.SYS_NAME = 'WAIT_FOR_OPEN_AVTO']
+   from Request_ID
+   into  doc_id, ACC_NUM, ACC_ID
+   do
+      if UpperCase(NormalizeB(ACC_NUM)) = UpperCase(NormalizeB(ACCOUNT_NUMBER)) then
+          OP_ID := DOC_ID;
+          Exit;
+      end;
+   end;
+//=======================================================================================================
+
+  if IsBlank(OP_ID) then
+      raise('Для  раскрываемого счета  ' + ACCOUNT_NUMBER +' не найдена операция раскрытия списка' );
+  end;
+  //Информация о зарегистрированном лице, по счету которого предоставляется отчет
+  if x_main.?account_holder then
+    x_account_holder:=x_main._account_holder;
+
+    _F_NXML2->Inp_Party_id_name_V03_t_with_FACE(x_account_holder, party_IDs_list, name_,HOLDER_FACE, InfoFrom);
+    if ~isBlank(InfoFrom) then
+       Info:= _f_report->Add_Info(Info, 'Зарегистрированное лицо, по счету которого предоставляется отчет ' + name_ +#13+#10+ InfoFrom);
+    end;
+  else
+      raise('В сообщении отсутствует блок Информация о лице, по счету которого предоставляется информация  <account_holder>');
+  end;
+
+    //Назначение предоставляемой информации. Первичный список - NEWM, дораскрытие - AMND
+     if x_main.?information_indicator then
+        x_information_indicator  := x_main._information_indicator;
+
+        //R_TYPE Тип по классификаторв CODE='FCDR2017_INFTYPE'
+        //ISANKREQ  = YES требуется/с  банковские реквизиты
+        // TMPL - номер шаблона
+
+         _F_NXML2->Inp_information_type_V02_t(x_information_indicator,'<information_indicator>',R_TYPE, IS_BANKREQ, TMPL, NARRATIVE, InfoFrom);
+        //_F_NXML->Inp_Information_type_t(x_information_indicator, InfoFrom,information_indicator, information_indicator_narrative);
+        Info:= _f_report->Add_Info(Info, InfoFrom);
+     else
+        raise('В сообщении отсутствует тип предоставляемой информации (тип списка) <information_indicator>');
+     end;
+    if x_main.?total_security_balance then
+    // Тут надо сравнить с запросом...
+       x_total_security_balance:=x_main._total_security_balance;
+       while not x_total_security_balance.@Eof do
+          _F_NXML2->Inp_Security_balance_t_v03 (x_total_security_balance, '<information_indicator>',  SHARE, total,  NARRATIVE, BLOCK_COUNT, FaceParamList, Sec_InfoList, PawnerList, InfoFrom);
+          Info:= _f_report->Add_Info(Info, InfoFrom);
+          x_total_security_balance.@next;
+       end;
+    end;
+
+
+ SelectSQL('Данные', [select U.DOL, U.AMOUNT_ALL, U.amount_opened,U.MUST_OPEN, U.IS_OPENED
+                     from  OD_DOLS DL
+                     left join U_OP_INF_REESTR_DOL2 U on U.DOL = DL.ID  and DL.NUM > 0 and DL.footer =2
+                      where DL.doc = :OP_ID and U.DEPO_2=:ACC_ID],OP_ID,ACC_ID,DOL_ID, AMOUNT_ALL, AMOUNT_OPENED, MUST_OPEN, IS_OPENED,dummy);
+
+  LOADED_AMOUNT := AMOUNT_OPENED  + Total;
+
+   if (Round(LOADED_AMOUNT - AMOUNT_ALL) <> 0)  then
+       if not %mute then
+         if not  Question('Общее Количество ЦБ в раскрывающем  счет списке ( '+Str(LOADED_AMOUNT)+' ) после загрузки не совпадет с общим количеством ЦБ на раскрываемом счете( '+Str(AMOUNT_ALL)+' )!'+#13+#10+'Продолжать загрузку?') then
+            raise(' Общее количество ЦБ в раскрывающем  счет списке  не совпадет с общим количеством ЦБ на раскрываемом счете. Оператор отказался от загрузки списка');
+         end;
+       end;
+   end;
+
+     if x_main.?register_list then
+        x_register_list := x_main._register_list;
+        shareholder_id_List := List();
+        // И что бы нам сделать с этим списком?
+
+//=======================================================================================================
+       x_register_list.@First;
+
+        while not x_register_list.@eof do
+           // Здесь doc_id должен быть от операции формирвания списка!!!
+           _F_NXML2->Inp_Register_list_dtls_t(OP_ID, BODY, %mute, x_register_list, Way, ACCOUNT_NUMBER, message_function, shareholder_id_List,InfoFrom);
+           Info:= _f_report->Add_Info(Info, InfoFrom);
+           x_register_list.@Next;
+        end;
+     else
+         Info := _f_report->Add_Info(Info,  _F_NXML2->Add_InfoWay(Way, 'Отсутствует обязательный  блок <register_list>'));
+     end;
+//=======================================================================================================
+//=======================================================================================================
+
+     IND := 0;
+
+     if x_main.?list_add_info then
+          while true do
+             add_info := _f_CXML->Get_XML_TAG(BODY,'REGISTER_OF_SHAREHOLDERS_V02/list_add_info',IND);
+             if Isblank(add_info) then
+                Exit;
+             else
+                ListAdd(InfoList,add_info);
+                INC(IND);
+             end;
+          end;
+     end;
+
+     if x_main.?pagination then
+      x_pagination := x_main._pagination;
+        if x_pagination.?register_list_id then
+           register_list_id :=  x_pagination._register_list_id;
+        else
+           Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <pagination>  отсутствует обязательный элемент <register_list_id>');
+        end;
+        if x_pagination.?page_total then
+           page_total :=  x_pagination._page_total;
+        else
+           Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <pagination>  отсутствует обязательный элемент <page_total>');
+        end;
+        if x_pagination.?page then
+           page :=  x_pagination._page;
+        else
+           Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <pagination>  отсутствует обязательный элемент <page>');
+        end;
+
+     end;
+
+     if x_main.?add_info then
+         try
+             x_add_info := x_main._add_info;
+               if  x_add_info.?XtnsnDt  then
+                   x_XtnsnDt := x_add_info._XtnsnDt;
+                     if XtnsnDt.?bank_prop_curr  then
+                         // Тут множество?
+
+                         x_bank_prop_curr :=XtnsnDt._bank_prop_curr;
+                         while not x_bank_prop_curr.@Eof do
+
+                             if x_bank_prop_curr.?shareholder_id  then
+                                b_shareholder_id := x_bank_prop_curr._shareholder_id;
+                             else
+                                Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <bank_prop_curr>  отсутствует обязательный элемент <shareholder_id>');
+                             end;
+                             if x_bank_prop_curr.?ccy_code  then
+                                b_ccy_code := x_bank_prop_curr._ccy_code;
+                             else
+                                Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <bank_prop_curr>  отсутствует обязательный элемент <ccy_code>');
+                             end;
+                             if x_bank_prop_curr.?b_ow_acc then
+                                b_ow_acc := x_bank_prop_curr._ow_acc;
+                             else
+                                Info := _f_report->Add_Info(Info, 'Нарушение формата. В блоке <bank_prop_curr>  отсутствует обязательный элемент <b_ow_acc>');
+                             end;
+                             if x_bank_prop_curr.?ow_swift  then
+                                b_ow_swift := x_bank_prop_curr._ow_swift;
+                             end;
+                             if x_bank_prop_curr.?ow_acc_n1 then
+                                b_ow_acc_n1 := x_bank_prop_curr._ow_acc_n1;
+                             end;
+                             if x_bank_prop_curr.?ow_acc_n2 then
+                                b_ow_acc_n2 := x_bank_prop_curr._ow_acc_n2;
+                             end;
+                             if x_bank_prop_curr.?ow_addr1 then
+                                b_ow_addr1 := x_bank_prop_curr._ow_addr1;
+                             end;
+                             if x_bank_prop_curr.?ow_addr2 then
+                                b_ow_addr2 := x_bank_prop_curr._ow_addr2;
+                             end;
+                             if x_bank_prop_curr.?bank_acc_c then
+                                b_bank_acc_c := x_bank_prop_curr._bank_acc_c;
+                             end;
+                             if x_bank_prop_curr.?ow_b_swift then
+                                b_ow_b_swift := x_bank_prop_curr._ow_b_swift;
+                             end;
+                             if x_bank_prop_curr.?ow_bn_n1 then
+                                b_ow_bn_n1 := x_bank_prop_curr._ow_bn_n1;
+                             end;
+                             if x_bank_prop_curr.?ow_bn_n2 then
+                                b_ow_bn_n2 := x_bank_prop_curr._ow_bn_n2;
+                             end;
+                             if x_bank_prop_curr.?ow_bn_a1 then
+                                b_ow_bn_a1 := x_bank_prop_curr._ow_bn_a1;
+                             end;
+                             if x_bank_prop_curr.?ow_bn_a2 then
+                                b_ow_bn_a2 := x_bank_prop_curr._ow_bn_a2;
+                             end;
+                             if x_bank_prop_curr.?md_b_swift then
+                                b_md_b_swift := x_bank_prop_curr._md_b_swift;
+                             end;
+                             if x_bank_prop_curr.?md_bn_n1 then
+                                b_md_bn_n1 := x_bank_prop_curr._md_bn_n1;
+                             end;
+                             if x_bank_prop_curr.?md_bn_n2 then
+                                b_md_bn_n2 := x_bank_prop_curr._md_bn_n2;
+                             end;
+                             if x_bank_prop_curr.?md_bn_a1 then
+                                 b_md_bn_a1 := x_bank_prop_curr._md_bn_a1;
+                             end;
+                             if x_bank_prop_curr.?md_bn_a2 then
+                                b_md_bn_a2 := x_bank_prop_curr._md_bn_a2;
+                             end;
+                             if x_bank_prop_curr.?add_info then
+                                b_add_info  := x_bank_prop_curr._add_info;
+                             end;
+
+                            counter :=  SelectSQL('Данные',[select ID from OD_EXT_FACES where DOC=:DOC and A_DUTY=:SHAREHOLDER],OP_ID,PREF+b_shareholder_id,EXT_FACE,dummy);
+                            // Надо бы проверить на 0 а то вставлять нельзя
+                            if counter > 0 then
+                                  VAL_CODE      :=b_ccy_code;
+                                  // Получатель
+                                  P_ACNT        := b_ow_acc;
+                                  P_SWIFT       := b_ow_swift;
+                                  P_NAME        := b_ow_acc_n1 + b_ow_acc_n2;
+                                  P_HOME_ADR    := b_ow_addr1 + b_ow_addr2;
+                                  //корреспондент
+                                  BANK_ACNT     := b_bank_acc_c;
+                                  BANK_SWIFT    := b_ow_b_swift;
+                                  BANK_NAME     := b_ow_bn_n1 + b_ow_bn_n2;
+                                  BANK_ADR      := b_ow_bn_a1 + b_ow_bn_a2;
+                                  //Посредник
+                                  M_BANK_SWIFT  := b_md_b_swift;
+                                  M_BANK_NAME   := b_md_bn_n1 + b_md_bn_n2;
+                                  M_BANK_ADR    := b_md_bn_a1 + b_md_bn_a2;
+                                  ADD_INFO      := b_add_info;
+                                  DESTINATION   :='';
+
+
+                                 ExecSQL('Данные',[insert into OD_EXT_FACE_CPAYS (EXT_FACE,    VAL_CODE,    P_ACNT,    P_SWIFT,     P_NAME,    P_HOME_ADR,
+                                   BANK_ACNT,    BANK_SWIFT,    BANK_NAME,    BANK_ADR,
+                                   M_BANK_SWIFT,    M_BANK_NAME,    M_BANK_ADR,    ADD_INFO,    DESTINATION)
+                                   values
+                                   (:EXT_FACE,    :VAL_CODE,    :P_ACNT,    :P_SWIFT,     :P_NAME,    :P_HOME_ADR,
+                                   :BANK_ACNT,    :BANK_SWIFT,    :BANK_NAME,    :BANK_ADR,
+                                   :M_BANK_SWIFT,    :M_BANK_NAME,    :M_BANK_ADR,    :ADD_INFO,    :DESTINATION)],
+                                   EXT_FACE,    VAL_CODE,    P_ACNT,    P_SWIFT,     P_NAME,    P_HOME_ADR,
+                                   BANK_ACNT,    BANK_SWIFT,    BANK_NAME,    BANK_ADR,
+                                   M_BANK_SWIFT,    M_BANK_NAME,    M_BANK_ADR,    ADD_INFO,    DESTINATION );
+                            end;
+                             x_bank_prop_curr.@Next
+                         end;
+                     end;
+               end;
+         except
+           Info := _f_report->Add_Info(Info , 'Нарушение формата. В блоке <add_info>  исключительная ситуация');
+         end;
+     end;
+//  Увеличим количестви принятых ответов в поле FACT_COUNT
+    FV_LIST := List();
+    // RequestList
+
+    //Ищщем единствернную строку, в которой Получатель = Отправитель Распаковываемого Списка
+    ListAdd(FV_LIST, 'ID_6='+str(FROM_FACE));
+    LINE :=_F_BUX_OP-> GET_DOL_BY_LIST(Request_ID, 6{%FOOTER}, FV_LIST);
+    If not IsNull(LINE) then
+    // Временно!!!
+        try
+           FACT_COUNT :=  int(_f_bux_op->GET_OP_VAL_LINE(Request_ID, LINE, 'FACT_COUNT'));
+        except
+           FACT_COUNT := 0;
+        end;
+        if IsBlank(FACT_COUNT) then FACT_COUNT := 0 end;
+
+        INC(FACT_COUNT);
+
+        _f_bux_op->MODIFY_OP_VAL_LINE(Request_ID, LINE, 'FACT_COUNT', FACT_COUNT );
+    end;
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+   if (Round(LOADED_AMOUNT - AMOUNT_ALL) =0)  then
+       ExecSQL('Данные',[update U_OP_INF_REESTR_DOL2  set IS_OPENED =:IS_OPENED,AMOUNT_OPENED =:AMOUNT_OPENED where DOL=:DOL],1,LOADED_AMOUNT,DOL_ID );
+       if not %mute then
+         Message('Счет раскрыт');
+       end;
+   else
+       ExecSQL('Данные',[update U_OP_INF_REESTR_DOL2  set AMOUNT_OPENED =:AMOUNT_OPENED where DOL=:DOL],LOADED_AMOUNT,DOL_ID );
+       if not %mute then
+           Warning('Общее Количество ЦБ в раскрывающем  счет списке ( '+Str(LOADED_AMOUNT)+' ) не совпадает с общим количеством ЦБ на раскрываемом счете( '+Str(AMOUNT_ALL)+' )!');
+       end;
+   end;
+
+
+ // создаем входящий документ в OD_FILER
+// InDocFiler_Add(%DOC:int; %CONTRACT:int; %FUND:int; %CORR_FACE:int; %DOC_NUM:str; %DOC_DATE:datetime; %NUM:str; %D_DATE:datetime; %COMMENT, %MESS, %FILE_NAME, %CORR_NUM :str; %CORR_DATE:datetime;
+// PLACE:int; ACCOUNT:int; PASS_KIND:int; RUBRICA :int; CREATOR :int; FAX_DATE: datetime; ORI_DATE :datetime; MUTE:int; DontLink:int, AddNew:int) :int
+
+  //_f_doc.InDocFiler_Add.PLACE:=PLACE;
+  _f_doc.InDocFiler_Add.ACCOUNT:=ACC_ID;
+
+//   if ~isBlank(MSG_BIZ) then
+//     _f_doc.InDocFiler_Add.RUBRICA:=Extract('Данные',[Select NUM from OD_USR_TABS where CODE='RUBRICATOR' and DOP=:DOP],MSG_BIZ);
+//   end;
+   _f_doc.InDocFiler_Add.PASS_KIND:=8;   // отправка по ЭДО
+   _f_doc.InDocFiler_Add.MUTE := %mute;
+   COMMENT :='Раскрытие списка лиц депонентом '+ FROM_NAME + ', эмитент '+ ISS_FULL_NAME + '  по запросу ' + request_doc_num + ' за ' + str(date(request_date));
+   FDOC:=_f_doc->InDocFiler_Add(%doc_id,null,null,FROM_FACE,their_doc_num, their_doc_date,Clear(''),Clear(now),COMMENT,clear(''),clear(''),clear(''),clear(now));
+  // Связь от входящего сообщения к операции формирования списка
+   _f_doc->Link_Add(%doc_id, OP_ID, 3003);
+
+  // Связь от входящего сообщения к запросу на раскрытие  списка
+   _f_doc->Link_Add(%doc_id, Request_ID, 3004);
+
+   return(0);
+
+
+
+except
+   _Metal_F->XML_Close;
+    Info := _f_report->Add_Info(Info , Exception.Text);
+    return (20500);
+end;

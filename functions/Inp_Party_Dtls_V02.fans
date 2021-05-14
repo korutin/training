@@ -1,0 +1,103 @@
+//Inp_Party_Dtls_V02_t(%ds:int;  %Way:str;  %U_DOCS:Table; %F_DOCS:Table;  Is_U : int; DOC_FACE:int; NAME:str;  NARRATIVE:Str; STATE:int;NATIONALITY:str; DATE_BIRTH:Date; BIRTHPLACE:str; UNKNOWN :str; FaceParamList:List; Info:Str) : int;
+//Разбирает  блок party_dtls_V02_t (Блок структурированной информации о лице с выбором характеристик стороны
+// находит юр/физ лицо в базе FANSY, если оно там есть
+//SVS
+
+
+//   %U_DOCS= Table(code_type str,doc_num str, doc_date date,reg_org str, param_type int, narrative str ) - Документы юр. лица
+//CODE_TYPE
+//LICS Лицензия
+//STIC Свидетельство о регистрации до 1 июля 2002г
+//REGN Свидетельство о регистрации и внесении записи в ЕГРЮЛ после 1 июля 2002г.
+//OGRN Свидетельство о внесении записи в ЕГРЮЛ
+//INCR Сертификат об инкорпорации
+//USTV Устав
+//OTHR Другое. Используется, если невозможно отнести тип документа к одному из указанных в справочнике типов
+//LEIC LEI code
+//SBIC SWIFT BIC
+//TMRL Правила доверительного управления ПИФ
+//MMRL Правила доверительного управления ипотечным покрытием
+
+// param_type = 1 =только номер, =2 серия и номер
+// doc_num := doc_ser +' '+ doc_num;
+
+
+
+// Документы физ. лица
+// %F_DOCS := Table(DOC_TYPE int, person_document_type_code str, narrative str, doc_num str, dtls_together str, dtls_apart_ser str, dtls_apart_num str, doc_date date, org str, place str);
+// DOC_TYPE  тип документа по справочнику FANSY
+// person_document_type_code тип документа по версии xml
+
+
+// Парамметры, которые могут быть возвращены (если они есть!) в списке   FaceParamList
+// формат списка: NAME=VALUE
+//FACENAME=     Наименование лица
+//DOC_TYPE=     тип документа в сист классификаторе FACE_DOCS
+//DOC_SER=      серия документа
+//DOC_NUM=      номер документа
+//DOC_DAT=      дата документа
+//DOC_PLACE=    место выдачи документа
+//COUNTRY=      код страны (ISO LAT 2 кажется?)
+//ADDRESS=      адрес
+//INDEX_=       индекс адреса
+//PLAIN=        адрес в формтае plain
+//COMMON_ADDR = обобщенный адрес
+//OGRN=         код ОГРН
+//OGRN_DATE=    Дата выдачи  ОГРН
+//OGRN_PLACE=   место выдачи ОГРН
+
+
+
+
+
+
+var x_address,x_identification_information;
+var AdrTp, Addr;
+
+var InfoFrom;
+InfoFrom:='';
+FaceParamList := List();
+
+  if (%ds.?Name) then
+     Name := %ds._Name;
+  else
+    Info := _F_XML->Add_Info(Info, _F_NXML2->Add_InfoWay(%Way, 'В  блоке <party_dtls_V02_t> отсутствует обязательный элемент <name>'));
+  end;
+
+  if (%ds.?address) then
+     x_address := %ds._address;
+     InfoFrom := '';
+//AdrTp 1 =ПАРТАД   2= Plain  3  обобщенный адрес
+    _F_NXML2->Inp_Address_V2_t(x_address, %Way, AdrTp, Addr,  InfoFrom);
+    If not IsBlank(InfoFrom) then
+       Info := _F_XML->Add_Info(Info, _F_NXML2->Add_InfoWay(%Way, InfoFrom));
+    end;
+  end;
+
+  if (%ds.?identification_information) then
+     x_identification_information := %ds._identification_information;
+     InfoFrom:='';
+     _F_NXML2->Inp_party_id_choice_t(x_identification_information, %Way, %U_DOCS, %F_DOCS,  Is_U, DOC_FACE,  narrative, STATE, NATIONALITY, DATE_BIRTH, BIRTHPLACE, unknown, FaceParamList,InfoFrom);
+      Info := _F_XML->Add_Info(Info, _F_NXML2->Add_InfoWay(%Way, InfoFrom));
+  end;
+  if not IsBlank(NAME) then
+     ListAdd(FaceParamList,'FACENAME='+NAME);
+   //COUNTRY=      код страны (ISO LAT 2 кажется?)
+   //ADDRESS=      адрес
+   //INDEX_=       индекс адреса
+   //PLAIN=        адрес в формтае plain
+     if not IsBlank(Addr) then
+        //AdrTp 1 =ПАРТАД   2= Plain  3  обобщенный адрес
+        if AdrTp = 1 then
+           //PARTAD_COUNTRY +'@'+PARTAD_INDEX +'@'+PARTAD_ADDRESS;
+            ListAdd(FaceParamList,'COUNTRY='+Token(Addr,'@',1));
+            ListAdd(FaceParamList,'INDEX_='+Token(Addr,'@',2));
+            ListAdd(FaceParamList,'ADDRESS='+Token(Addr,'@',3));
+        elsif   AdrTp = 2 then
+            ListAdd(FaceParamList,'PLAIN='+Addr);
+        else
+           ListAdd(FaceParamList,'COMMON_ADDR='+Addr);
+        end;
+     end;
+  end;
+DOC_FACE;

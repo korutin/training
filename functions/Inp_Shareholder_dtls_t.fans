@@ -1,0 +1,1128 @@
+//Inp_Shareholder_dtls_t(%doc_id:int, %mute:int, %ds: int; %Way:str,   %ACCOUNT_NUMBER:str, %A_POWER:int, Info: str)
+
+//SVS
+// %ACCOUNT_NUMBER - номер раскрываемого счета в нашем депозитарии
+// %doc_id идентификатор операции формирования информации
+
+var  Account_ID, skp_ID, skp_id_type,skp_narrative, issuer, scheme_name,account_counter;
+var AdrTp,Addr,P_INN, PENSNUM, file_name,file_contents;
+var PhoneList:=List(), EMail_List :=List();
+var PawnerList := List();
+var InfoFrom :='';
+var Way;
+var x_account_dtls, x_party_dtls;
+var  x_beneficiary,x_beneficiaries, x_postal_name,x_party_account_type,x_joint_owners,x_shareholder_contacts,
+     x_tax_category, x_bank_prop_rub, x_security_balance,x_attch;
+var Is_U, DOC_FACE, BEN_NAME,SHARE,TOTAL,BLOCK_COUNT,SEC_Code,DOC_TYPE,DOC_NUM, DOC_SER, DOC_DATE, ORG, PLACE, DOCUMENT,PERSON_DOCUMENT_TYPE_CODE;
+var shareholder_id, joint_name, NAME_,  NARRATIVE, STATE, NATIONALITY,  DATE_BIRTH, BIRTHPLACE, UNKNOWN,party_account_type_narrative,
+     party_account_type_code,country_location ,authorization_info ;
+var MAIL_ADR, PARTAD_COUNTRY, PARTAD_INDEX, PARTAD_ADDRESS,shareholder_postal_address,shareholder_postal_name;
+var PAY_NAME,INN,ACC_RS,BANK_NAME,BANK_BIC, BANK_CITY, BANK_KORR, PAY_ADD_INFO;
+var  tax_status_code, nonresident_type, tax_exempt_indicator;
+var II,JJ,KK,NN, S,S1,S2;
+
+var ID,START_NUM_3,START_NUM_4, LINE;
+var OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN, OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+OW_MAIL_ADR,OW_HOME_ADR, OW_PHONE, OW_FAX, OW_EMAIL,OW_IS_NERES,B_BIC, B_NAME, B_KORR, B_CITY,  B_DEPT, B_DEPT_AC, DOP_INFO,
+OW_HOME_KLADR, OW_MAIL_KLADR, OW_B_P_INN, OW_B_P_NAME, OW_B_P_ACNT,  OW_OGRN, OW_OGRN_D, OW_OGRN_P;
+var ownership_ratio;
+var   PREF, DOL_3,  DOL_4,    ACCOUNT_TYPE_CODE, ACCOUNT_TYPE_NARR,
+    S_KEEPING_PLACE_ID,    S_K_P_TYPE_CODE ,    S_K_P_NARRATIVE;
+
+var AccountInfoList, Sec_InfoList, FaceParamList, JointList, AddInfoList;
+var FV_LIST;
+var JOINT_S_TYPE, JOINT_NUM;
+var MAIN_OWNER_ID;
+var ACCOUNT_ID_, PLAN_ID;
+var SS;
+var Is_Party,Is_Joint,choise_flag;
+var A_RELATION;
+var   U_DOCS       := Table(code_type str,doc_num str, doc_date date,reg_org str, param_type int, narrative str ); //- Документы юр. лица
+var   F_DOCS       := Table(DOC_TYPE int, person_document_type_code str, narrative str, doc_num str, dtls_together str, dtls_apart_ser str, dtls_apart_num str, doc_date date, org str, place str);
+var   t_DOCS       := Table(DOC_TYPE int, person_document_type_code str, narrative str, doc_num str, dtls_together str, dtls_apart_ser str, dtls_apart_num str, doc_date date, org str, place str); //- таблицы с документами ви
+var   T_JOINTS     := Table(JOINT_NUM int, JOINT_S_TYPE int, DOCUMENT str,joint_name str, DATE_BIRTH date,  BIRTHPLACE str, AdrTp str,  Addr str, ownership_ratio  str);
+// t_DOCS     - таблица с идентифицирующими документами формата Table(DOC_TYPE int, person_document_type_code str, narrative str, doc_num str, dtls_together str, dtls_apart_ser str, dtls_apart_num str, doc_date date, org str, place str)
+//   DOC_TYPE - код документа с точки зрения справочников Fansy
+//   person_document_type_code - код документа такой каким его достали из XML
+//   narrative - сюда записывается текстовое описание кода с точки зрения форматов FCDR_2017_2, если person_document_type_code = '00' (Прочее), то здесь содержится описание этого прочее из элемента.
+
+var   SecRestTable := Table(SHARE int, TOTAL float);
+
+//Номер счета в месте учета
+//'account_id='+ account_id); номер счета
+//issuer='+ issuer);          Указывается код Организации, ведущей справочник
+// scheme_name='+ scheme_name);  Наименование схемы кодировки – для организаций, зарегистрированных SWIFT
+// SKP_ID='+ SKP_ID);            Идентификатор, характеризующий депозитарий конечного владельца
+// SKP_id_type='+ SKP_id_type);    Код типа идентификации места хранения (например OGRN), если указан код OTHR, обязательно  заполнить narrative
+// SKP_narrative='+ SKP_narrative);
+
+AccountInfoList := List();
+// Парамметры, которые могут быть возвращены (если они есть!) в списке   Sec_InfoList
+// формат списка: NAME=VALUE
+//** S_CLASS=     Вид ценной бумаги = S_CLASS
+//CFI=         код  CFI
+//nominal=     номинад
+//ccy_code=    Код валюты номинала
+//reg_num=     Номер гос. регистрации
+//ISIN=        код ISIN
+//PSC=         proprietary_security_code код ЦБ
+//FIT=         Код вида финансового инструмента
+//**S_TYPE=      Тип ценной бумаги
+//** S_CAT=       Категория ценной бумаги по предоставляемым правам
+// **  -    По справочнику FANSY
+Sec_InfoList    := List();
+// Парамметры  бенефициара  и - документы, которые могут быть возвращены (если они есть!) в списке   FaceParamList
+// формат списка: NAME=VALUE
+//FACENAME=     Наименование лица
+//DOC_TYPE=     тип документа в сист классификаторе FACE_DOCS
+//DOC_SER=      серия документа
+//DOC_NUM=      номер документа
+//DOC_DAT=      дата документа
+//DOC_PLACE=    место выдачи документа
+//COUNTRY=      код страны (ISO LAT 2 кажется?)
+//ADDRESS=      адрес
+//INDEX_=       индекс адреса
+//PLAIN=        адрес в формтае plain
+//COMMON_ADDR = обобщенный адрес
+//OGRN=         код ОГРН
+//OGRN_DATE=    Дата выдачи  ОГРН
+//OGRN_PLACE=   место выдачи ОГРН
+
+FaceParamList   := List();
+// JointList - Список совладельцев ИМЯ= ЗНАЧЕНИЕ
+// Начинаестя со строки вида 'JJ=' + Порядковый номер совладельца
+// Дальще строки с параметрами совладельца, если не пустые  JOINT_NAME, STATE, NATIONALITY,DATE_BIRTH,  BIRTHPLACE С префиксом JJ_
+//Дальше список реквизитов  документо Каждяяй документ начинается со строки виде NN=
+//Реквизиты с префиксом NN_
+
+JointList       := List();
+// Список  информации из тэгов  AddInfo блока bebeficiary
+
+
+uses _F_NXML2;
+
+
+AddInfoList     := List();
+OW_DATE_BIRTH :=clear(now);
+OW_D_DAT      :=clear(now);
+OW_OGRN_D     :=clear(now);
+OW_S_TYPE:= Clear(0);
+OW_D_TYPE:= Clear(0);
+OW_NAME:=  OW_INN:=
+OW_D_SER:= OW_D_NUM:=  OW_D_PLACE:= OW_MAIL_ADR:= OW_HOME_ADR:= OW_PHONE:= OW_FAX:= OW_EMAIL:=
+B_BIC:= B_NAME:= B_KORR:= B_CITY:=  B_DEPT:= B_DEPT_AC:= OW_B_P_INN:= OW_B_P_NAME:= OW_B_P_ACNT:=
+OW_HOME_KLADR:= OW_MAIL_KLADR:= OW_OGRN :=  OW_OGRN_P:= DOP_INFO :='';
+
+
+
+x_party_dtls := clear(0);
+x_joint_owners := clear(0);
+
+ PLAN_ID := _F_BUX->Get_Plan_By_SysName('DEPO_BANK');
+      // Подготовка префикса для формирования значения shareholder_id;
+      PREF := %ACCOUNT_NUMBER;
+      PREF := Replace(PREF,'_','-');
+      PREF := PREF +'_';
+      ACCOUNT_ID_  := Extract('Данные', [select ID from OD_CLIENTS  where NUMBER =:NUMBER and  TYPE_=2 and PLAN_ID =:PLAN_ID],%ACCOUNT_NUMBER, PLAN_ID);
+
+      START_NUM_3 := Extract('Данные', [select max(NUM) from OD_DOLS where DOC = :DOC and FOOTER = 3], %doc_id);
+      START_NUM_4 := Extract('Данные', [select max(NUM) from OD_DOLS where DOC = :DOC and FOOTER = 4], %doc_id);
+
+
+Way:=_F_NXML2->Add_Way(%Way, 'shareholder');
+
+   if %ds.?shareholder_id  then
+       shareholder_id := %ds._shareholder_id;  //Длина 35 символов
+   else
+       Info := _f_report->Add_Info(Info,'В блоке <Shareholder_dtls_t>  отсутствует обязательный тэг <shareholder_id>');
+   end;
+
+   if %ds.?party_account_type   then
+       x_party_account_type :=  %ds._party_account_type;
+       if x_party_account_type.?party_account_type_code then
+          party_account_type_code := x_party_account_type._party_account_type_code;
+       else
+         Info := _f_report->Add_Info(Info,'В блоке <party_account_type>  отсутствует обязательный блок <party_account_type_code>');
+       end;
+       if x_party_account_type.?narrative then
+          party_account_type_narrative := x_party_account_type._narrative;
+       end;
+   end;
+
+  if %ds.?account_dtls  then
+      x_account_dtls := %ds._account_dtls;
+      _F_NXML2->Inp_Account_dtls_v03_t(x_account_dtls, Account_ID, skp_ID, skp_id_type,skp_narrative, issuer, scheme_name,account_counter, InfoFrom);
+      Info := _f_report->Add_Info(Info,InfoFrom);
+  else
+      Info := _f_report->Add_Info(Info,'В блоке <shareholder_dtls_t>  Отсутствует обязательный блок <account_dtls>');
+  end;
+
+   // Доля владения / OwnerShipRatio/ Указывается простая дробь - числитель и знаменатель.
+
+  if %ds.?choise_flag then
+     choise_flag := %ds._choise_flag;
+     if  choise_flag ='joint_owners' then
+        Is_Party := 0;
+        Is_Joint := 1;
+     elsif  choise_flag ='party_dtls' then
+        Is_Party := 1;
+        Is_Joint := 0;
+     else
+        Is_Party := 0;
+        Is_Joint := 0;
+     end;
+  else
+        Is_Party := 1;
+        Is_Joint := 0;
+  end;
+
+  if Is_Party = 1 then
+     x_party_dtls :=%ds._party_dtls;
+
+
+     if  Is_Party =1 and  ~IsBlank(x_party_dtls)  then
+
+         TableClear(U_DOCS);
+         TableClear(F_DOCS);
+          // Адрес в FACEParamList!
+          // Парамметры  бенефициара  и - документы, которые могут быть возвращены (если они есть!) в списке   FaceParamList
+          // формат списка: NAME=VALUE
+          //FACENAME=     Наименование лица
+          //DOC_TYPE=     тип документа в сист классификаторе FACE_DOCS
+          //DOC_SER=      серия документа
+          //DOC_NUM=      номер документа
+          //DOC_DAT=      дата документа
+          //DOC_PLACE=    место выдачи документа
+          //COUNTRY=      код страны (ISO LAT 2 кажется?)
+          //ADDRESS=      адрес
+          //INDEX_=       индекс адреса
+          //PLAIN=        адрес в формтае plain
+          //COMMON_ADDR = обобщенный адрес
+          //OGRN=         код ОГРН
+          //OGRN_DATE=    Дата выдачи  ОГРН
+          //OGRN_PLACE=   место выдачи ОГРН
+
+         _F_NXML2.Inp_Party_Dtls_V02_t.NFF := 1;
+         _F_NXML2->Inp_Party_Dtls_V02_t(x_party_dtls,  Way,  U_DOCS, F_DOCS,  Is_U, DOC_FACE, NAME_,  NARRATIVE, STATE, NATIONALITY,  DATE_BIRTH, BIRTHPLACE, UNKNOWN, FaceParamList, InfoFrom);
+          Info := _f_report->Add_Info(Info,InfoFrom);
+     end;
+  end;
+
+  if Is_Joint = 1 then
+
+     x_joint_owners :=%ds._joint_owners;
+
+     if %ds.?joint_owners <>0 and   ~IsBlank(x_joint_owners) then
+
+         II := 1;
+         TableClear(T_JOINTS);
+         while not x_joint_owners.@Eof do
+
+             TableClear(T_DOCS);
+            _F_NXML2->Inp_Joint_owner_t(x_joint_owners, t_DOCS,  joint_name, STATE, NATIONALITY, DATE_BIRTH,  BIRTHPLACE, UNKNOWN,    AdrTp,  Addr, ownership_ratio, InfoFrom);
+             Info := _f_report->Add_Info(Info,InfoFrom);
+             if T_DOCS.@RecordCount > 0 then
+                 T_DOCS.@FIRST;
+                  //t_DOCS  := Table(DOC_TYPE int, person_document_type_code str, narrative str, doc_num str, dtls_together str, dtls_apart_ser str, dtls_apart_num str, doc_date date, org str, place str); //- таблицы с документами ви
+                 while not T_DOCS.@Eof do
+                    PERSON_DOCUMENT_TYPE_CODE := T_DOCS._person_document_type_code;
+                    if PERSON_DOCUMENT_TYPE_CODE <> '00' then
+                       JOINT_S_TYPE := 0;
+                       DOC_TYPE := T_DOCS._DOC_TYPE;
+                       DOC_NUM  := T_DOCS._DOC_NUM;
+                       DOC_SER  := T_DOCS._DTLS_APART_SER;
+                       DOC_DATE := T_DOCS._DOC_DATE;
+                       ORG      := T_DOCS._ORG;
+                       PLACE    := T_DOCS._PLACE;
+                       DOCUMENT := str(DOC_TYPE) +';'+DOC_NUM +';'+DOC_SER +';' + str(DOC_DATE) +';' + ORG + ';' + PLACE;
+                    else
+                       JOINT_S_TYPE := 1;
+                       DOCUMENT := UNKNOWN;
+                    end;
+                    Exit;
+                 end;
+             else
+                  JOINT_S_TYPE := 1;
+                  DOCUMENT := UNKNOWN;
+             end;
+              TableInsert(T_JOINTS, List('JOINT_NUM='+str(ii),'JOINT_S_TYPE='+str(JOINT_S_TYPE),'DOCUMENT='+DOCUMENT,'JOINT_NAME='+joint_name,'DATE_BIRTH='+str(DATE_BIRTH),'BIRTHPLACE='+BIRTHPLACE,'ADRTP='+AdrTp,'ADDR='+Addr,'ownership_ratio='+OWNERSHIP_RATIO));
+    //         var   T_JOINTS     := Table(JOINT_NUM int, JOINT_S_TYPE int, DOCUMENT str,joint_name str,  DATE_BIRTH date,  BIRTHPLACE str, AdrTp str,  Addr str, ownership_ratio  str);
+             // STATE = ISO_LAT_3, Нет!! ISO_LAT_2!!!!
+             INC(II);
+             x_joint_owners.@Next;
+         end;
+     end;
+  end;
+  if Is_Joint = 0 and Is_Party = 0 and  not IsBlank(choise_flag) then
+     Info := _f_report->Add_Info(Info,'В блоке <shareholder_dtls_t>  Отсутствует один из обязательных блоков <party_dtls>  или <joint_owners>');
+  end;
+
+
+  if %ds.?postal_name then
+     x_postal_name := %ds._postal_name;
+     if x_postal_name.?name then
+        shareholder_postal_name:= x_postal_name._name;
+     else
+        Info := _f_report->Add_Info(Info,'В блоке <shareholder_dtls_t>   в блоке  <postal_name>  Отсутствует обязательный блок <name>');
+     end;
+     if x_postal_name.?address then
+        shareholder_postal_address:= x_postal_name._address;
+        _F_NXML2->Inp_Address_V03_t(shareholder_postal_address, '<shareholder_dtls_t>', MAIL_ADR, PARTAD_COUNTRY, PARTAD_INDEX, PARTAD_ADDRESS, InfoFrom);
+         Info := _f_report->Add_Info(Info,InfoFrom);
+     else
+        Info := _f_report->Add_Info(Info,'В блоке <shareholder_dtls_t>   в блоке  <postal_name>  Отсутствует обязательный блок <address>');
+     end;
+
+  end;
+
+
+   if %ds.?shareholder_contacts then
+       x_shareholder_contacts := %ds._shareholder_contacts;
+       _F_NXML2->Inp_Party_contacts_V02_t(x_shareholder_contacts, PhoneList, EMail_List, InfoFrom);
+       Info := _f_report->Add_Info(Info,InfoFrom);
+   end;
+
+
+    if %ds.?country_location then
+        country_location := %ds._country_location;
+    end;
+
+   if %ds.?tax_category then
+       x_tax_category := %ds._tax_category;
+       _F_NXML2->Inp_Tax_Category_V02_t(x_tax_category, TAX_STATUS_CODE, NONRESIDENT_TYPE, TAX_EXEMPT_INDICATOR, NARRATIVE, InfoFrom);
+       Info := _f_report->Add_Info(Info,InfoFrom);
+
+   end;
+
+   if %ds.?bank_prop_rub then
+       x_bank_prop_rub := %ds._bank_prop_rub;
+       _F_NXML2->Inp_Bank_Prop_Rub_V02_t(x_bank_prop_rub, Way,  InfoFrom, PAY_NAME,INN,ACC_RS,BANK_NAME,BANK_BIC, BANK_CITY, BANK_KORR, PAY_ADD_INFO,issuer,scheme_name);
+       Info := _f_report->Add_Info(Info,InfoFrom);
+
+   end;
+
+    if %ds.?authorization_info then
+        authorization_info := %ds._authorization_info;
+    end;
+//=====
+    jj := T_JOINTS.@RecordCount;
+    if JJ > 0  and %ds.?joint_owners then
+       //  Совладельцы
+        T_JOINTS.@First;
+        MAIN_OWNER_ID := Clear(0);
+
+        while not T_JOINTS.@Eof do
+
+            OW_NAME        := T_JOINTS._joint_name;
+
+            if OW_NAME =  shareholder_postal_name then
+             // Суперсовладелец
+                OW_S_TYPE := T_JOINTS._JOINT_S_TYPE; // Пока так, я не вижу нигде признаков юрика
+                JOINT_NUM := T_JOINTS._JOINT_NUM;
+                if   OW_S_TYPE <> 1 then
+                    if int(TAX_STATUS_CODE = 1) then
+                       OW_IS_NERES    := 0;
+                    else
+                       OW_IS_NERES    := 1;
+                    end;
+                    if not IsBlank(T_JOINTS._DATE_BIRTH) then
+                       OW_DATE_BIRTH  :=  T_JOINTS._DATE_BIRTH;
+                    else
+                       OW_DATE_BIRTH  :=  Clear(now);
+                    end;
+                    OW_INN := clear('');
+                    // Из BANK_PROP_RUB!?
+                    //               DOCUMENT := str(DOC_TYPE) +';'+DOC_NUM +';'+DOC_SER +';' + str(DOC_DAT) +';' + ORG + +';' + PLACE;
+
+                    OW_D_TYPE      := Token(T_JOINTS._DOCUMENT,';',1);
+                    OW_D_SER       := Token(T_JOINTS._DOCUMENT,';',3);
+                    OW_D_NUM       := Token(T_JOINTS._DOCUMENT,';',2);
+                    try
+                       OW_D_DAT    := Date(Token(T_JOINTS._DOCUMENT,';',4));
+                    except
+                       OW_D_DAT    :=Clear(now) ;
+                    end;
+                    OW_D_PLACE     := Token(T_JOINTS._DOCUMENT,';',6);
+                else
+                   OW_D_TYPE      := Clear(0);
+                    if int(TAX_STATUS_CODE = 1) then
+                       OW_IS_NERES    := 0;
+                    else
+                       OW_IS_NERES    := 1;
+                    end;
+                end;
+                //AdrTp 1 =ПАРТАД   2= Plain  3  обобщенный адрес
+                //       S :=     PARTAD_COUNTRY +'@'+PARTAD_INDEX +'@'+PARTAD_ADDRESS;
+                if not IsBlank(T_JOINTS._AdrTp) then
+                    try
+                        if int(T_JOINTS._AdrTp) = 1 then
+                           OW_HOME_ADR:=Token(T_JOINTS._Addr,'@',3);
+                        elsif int(T_JOINTS._AdrTp) = 2 then
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        else
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        end;
+                    except
+                       OW_HOME_ADR:= '';
+                    end;
+                end;
+
+
+                B_BIC          :=  BANK_BIC;
+                B_NAME         :=  BANK_NAME;
+                B_KORR         :=  BANK_KORR;
+                B_CITY         :=  BANK_CITY;
+                B_DEPT         := '';
+                B_DEPT_AC      :=  '';
+                // -----
+                DOP_INFO       := PAY_ADD_INFO;
+                // -----
+                OW_HOME_KLADR  := '';
+                OW_MAIL_KLADR  := '';
+                OW_B_P_INN     := P_INN;//???????????????????????
+                OW_B_P_NAME    := PAY_NAME;
+                OW_B_P_ACNT    := ACC_RS;
+
+
+                if IsNull(OW_INN)     then        OW_INN:='';        end;
+                if IsNull(OW_FAX)     then        OW_FAX:='';        end;
+                if IsNull(B_BIC)      then        B_BIC:='';         end;
+                if IsNull(B_CITY)     then        B_CITY:='';        end;
+                if IsNull(B_NAME)     then        B_NAME:='';        end;
+                if IsNull(B_KORR)     then        B_KORR:='';        end;
+                if IsNull(B_DEPT_AC)  then        B_DEPT_AC:='';     end;
+                if IsNull(OW_B_P_INN) then        OW_B_P_INN:='';    end;
+                if IsNull(OW_B_P_NAME)then        OW_B_P_NAME:='';   end;
+                if IsNull(OW_B_P_ACNT)then        OW_B_P_ACNT:='';   end;
+                if IsNull(DOP_INFO)   then        DOP_INFO:='';      end;
+                //if IsNull(OW_OGRN_D)  then       date('16.01.1900');  end;
+
+
+
+               // фиксируем Главного совладельца
+               MAIN_OWNER_ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+               ExecSQL('Данные', [insert into OD_EXT_FACES (
+               ID, DOC, S_TYPE, NAME, DATE_BIRTH, INN,
+               DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,
+               MAIL_ADR, HOME_ADR, PHONE, FAX, EMAIL, STATE, IS_NERES,
+               BANK_BIC, BANK_NAME, BANK_KORR, BANK_CITY, BANK_DEPART, BANK_DEPART_ACNT,
+               BANK_P_INN, BANK_P_NAME, BANK_P_ACNT,
+               HOME_KLADR, MAIL_KLADR,
+               OGRN, OGRN_DATE, OGRN_PLACE,
+               DOP_INFO, A_TYPE, A_DUTY , A_RELATION, A_POWER
+               ) values(
+               :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH, :INN,
+               :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,
+               :MAIL_ADR, :HOME_ADR, :PHONE, :FAX, :EMAIL, :STATE, :IS_NERES,
+               :BANK_BIC, :BANK_NAME, :BANK_KORR, :BANK_CITY, :BANK_DEPART, :BANK_DEPART_ACNT,
+               :BANK_P_INN, :BANK_P_NAME, :BANK_P_ACNT,
+               :HOME_KLADR, :MAIL_KLADR,
+               :OGRN, :OGRN_DATE, :OGRN_PLACE,
+               :DOP_INFO,:A_TYPE, :A_DUTY, :A_RELATION, :A_POWER)],
+
+               MAIN_OWNER_ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN,
+               OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+               OW_MAIL_ADR,OW_HOME_ADR, OW_PHONE, OW_FAX, OW_EMAIL,iif(OW_IS_NERES =1,'', '643'),OW_IS_NERES,
+               B_BIC, B_NAME, B_KORR, B_CITY,  B_DEPT, B_DEPT_AC,
+               OW_B_P_INN, OW_B_P_NAME, OW_B_P_ACNT,
+               OW_HOME_KLADR, OW_MAIL_KLADR,
+               OW_OGRN, OW_OGRN_D, OW_OGRN_P,
+               DOP_INFO, 2 , PREF+shareholder_id+'_'+str(JOINT_NUM), MAIN_OWNER_ID, %A_POWER);
+
+               // Главного совладельца - в третий подвал
+                LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_3), 3);
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_DEPO', ACCOUNT_ID_ );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERID', PREF+shareholder_id);
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_', str(MAIN_OWNER_ID) );
+               Exit;
+            end;
+           T_JOINTS.@Next;
+        end;
+
+        //===== Критический случай. Код ниже выполняться не должен
+
+        if IsBlank(MAIN_OWNER_ID) then
+            // Главного не нашел, беру любого   первого и делаю Главным
+            T_JOINTS.@First;
+             OW_NAME        := T_JOINTS._joint_name;
+             shareholder_postal_name := OW_NAME;
+
+                OW_S_TYPE := T_JOINTS._JOINT_S_TYPE; // Пока так, я не вижу нигде признаков юрика
+                JOINT_NUM := T_JOINTS._JOINT_NUM;
+                if IsBlank(OW_S_TYPE) then
+                   OW_S_TYPE := 1;
+                   OW_IS_NERES    := 0;
+                end;
+                if   OW_S_TYPE <> 1 then
+                 // Суперсовладелец
+                    if int(TAX_STATUS_CODE = 1) then
+                       OW_IS_NERES    := 0;
+                    else
+                       OW_IS_NERES    := 1;
+                    end;
+                    if not IsBlank(T_JOINTS._DATE_BIRTH) then
+                       OW_DATE_BIRTH  :=  T_JOINTS._DATE_BIRTH;
+                    else
+                       OW_DATE_BIRTH  :=  Clear(now);
+                    end;
+                    OW_INN := clear('');
+                    // Из BANK_PROP_RUB!?
+                    //               DOCUMENT := str(DOC_TYPE) +';'+DOC_NUM +';'+DOC_SER +';' + str(DOC_DAT) +';' + ORG + +';' + PLACE;
+
+                    OW_D_TYPE      := Token(T_JOINTS._DOCUMENT,';',1);
+                    OW_D_SER       := Token(T_JOINTS._DOCUMENT,';',3);
+                    OW_D_NUM       := Token(T_JOINTS._DOCUMENT,';',2);
+                    try
+                       OW_D_DAT    := Date(Token(T_JOINTS._DOCUMENT,';',4));
+                    except
+                       OW_D_DAT    :=Clear(now) ;
+                    end;
+                    OW_D_PLACE     := Token(T_JOINTS._DOCUMENT,';',6);
+                else
+                   OW_D_TYPE      := Clear(0);
+                   OW_IS_NERES    := 0;
+                end;
+                //AdrTp 1 =ПАРТАД   2= Plain  3  обобщенный адрес
+                //       S :=     PARTAD_COUNTRY +'@'+PARTAD_INDEX +'@'+PARTAD_ADDRESS;
+                if not IsBlank(T_JOINTS._AdrTp) then
+                    try
+                        if int(T_JOINTS._AdrTp) = 1 then
+                           OW_HOME_ADR:=Token(T_JOINTS._Addr,'@',3);
+                        elsif int(T_JOINTS._AdrTp) = 2 then
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        else
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        end;
+                    except
+                       OW_HOME_ADR:= '';
+                    end;
+                end;
+
+
+                B_BIC          :=  BANK_BIC;
+                B_NAME         :=  BANK_NAME;
+                B_KORR         :=  BANK_KORR;
+                B_CITY         :=  BANK_CITY;
+                B_DEPT         := '';
+                B_DEPT_AC      :=  '';
+                // -----
+                DOP_INFO       := PAY_ADD_INFO;
+                // -----
+                OW_HOME_KLADR  := '';
+                OW_MAIL_KLADR  := '';
+                OW_B_P_INN     := P_INN;//???????????????????????
+                OW_B_P_NAME    := PAY_NAME;
+                OW_B_P_ACNT    := ACC_RS;
+
+                if IsNull(OW_INN)     then        OW_INN:='';        end;
+                if IsNull(OW_FAX)     then        OW_FAX:='';        end;
+                if IsNull(B_BIC)      then        B_BIC:='';         end;
+                if IsNull(B_CITY)     then        B_CITY:='';        end;
+                if IsNull(B_NAME)     then        B_NAME:='';        end;
+                if IsNull(B_KORR)     then        B_KORR:='';        end;
+                if IsNull(B_DEPT_AC)  then        B_DEPT_AC:='';     end;
+                if IsNull(OW_B_P_INN) then        OW_B_P_INN:='';    end;
+                if IsNull(OW_B_P_NAME)then        OW_B_P_NAME:='';   end;
+                if IsNull(OW_B_P_ACNT)then        OW_B_P_ACNT:='';   end;
+                if IsNull(DOP_INFO)   then        DOP_INFO:='';      end;
+                //if IsNull(OW_OGRN_D)  then       date('16.01.1900');  end;
+
+
+               // фиксируем Главного совладельца
+               MAIN_OWNER_ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+               ExecSQL('Данные', [insert into OD_EXT_FACES (
+               ID, DOC, S_TYPE, NAME, DATE_BIRTH, INN,
+               DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,
+               MAIL_ADR, HOME_ADR, PHONE, FAX, EMAIL, STATE, IS_NERES,
+               BANK_BIC, BANK_NAME, BANK_KORR, BANK_CITY, BANK_DEPART, BANK_DEPART_ACNT,
+               BANK_P_INN, BANK_P_NAME, BANK_P_ACNT,
+               HOME_KLADR, MAIL_KLADR,
+               OGRN, OGRN_DATE, OGRN_PLACE,
+               DOP_INFO, A_TYPE, A_DUTY , A_RELATION, A_POWER
+               ) values(
+               :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH, :INN,
+               :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,
+               :MAIL_ADR, :HOME_ADR, :PHONE, :FAX, :EMAIL, :STATE, :IS_NERES,
+               :BANK_BIC, :BANK_NAME, :BANK_KORR, :BANK_CITY, :BANK_DEPART, :BANK_DEPART_ACNT,
+               :BANK_P_INN, :BANK_P_NAME, :BANK_P_ACNT,
+               :HOME_KLADR, :MAIL_KLADR,
+               :OGRN, :OGRN_DATE, :OGRN_PLACE,
+               :DOP_INFO,:A_TYPE, :A_DUTY, :A_RELATION, :A_POWER)],
+
+               MAIN_OWNER_ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN,
+               OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+               OW_MAIL_ADR,OW_HOME_ADR, OW_PHONE, OW_FAX, OW_EMAIL,iif(OW_IS_NERES =1,'', '643'),OW_IS_NERES,
+               B_BIC, B_NAME, B_KORR, B_CITY,  B_DEPT, B_DEPT_AC,
+               OW_B_P_INN, OW_B_P_NAME, OW_B_P_ACNT,
+               OW_HOME_KLADR, OW_MAIL_KLADR,
+               OW_OGRN, OW_OGRN_D, OW_OGRN_P,
+               DOP_INFO, 2 , PREF+shareholder_id+'_'+str(JOINT_NUM), MAIN_OWNER_ID, %A_POWER);
+               // В A_TYPE пометим его как владельца
+               // Главного совладельца  как владельца - в третий подвал
+                LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_3), 3);
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_DEPO', ACCOUNT_ID_ );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERID', PREF+shareholder_id);
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_', str(MAIN_OWNER_ID) );
+        end;
+//=====
+
+    //  Остальные Совладельцы
+        T_JOINTS.@First;
+        while not T_JOINTS.@Eof do
+            //T_JOINTS     := Table(JOINT_NUM int, DOCUMENT str,joint_name str,  DATE_BIRTH date,  BIRTHPLACE str, AdrTp str,  Addr str, ownership_ratio  str);
+
+            OW_NAME        := T_JOINTS._joint_name;
+            if OW_NAME <> shareholder_postal_name then
+                OW_S_TYPE := T_JOINTS._JOINT_S_TYPE; // Пока так, я не вижу нигде признаков юрика
+                JOINT_NUM := T_JOINTS._JOINT_NUM;
+                    if IsBlank(OW_S_TYPE) then
+                       OW_S_TYPE := 1;
+                       OW_IS_NERES    := 0;
+                    end;
+
+                if   OW_S_TYPE <> 1 then
+                    if not IsBlank(T_JOINTS._DATE_BIRTH) then
+                       OW_DATE_BIRTH  :=  T_JOINTS._DATE_BIRTH;
+                    else
+                       OW_DATE_BIRTH  :=  Clear(now);
+                    end;
+                    OW_INN := clear('');
+                    // Из BANK_PROP_RUB!?
+                    //               DOCUMENT := str(DOC_TYPE) +';'+DOC_NUM +';'+DOC_SER +';' + str(DOC_DAT) +';' + ORG + +';' + PLACE;
+
+                    OW_D_TYPE      := Token(T_JOINTS._DOCUMENT,';',1);
+                    OW_D_SER       := Token(T_JOINTS._DOCUMENT,';',3);
+                    OW_D_NUM       := Token(T_JOINTS._DOCUMENT,';',2);
+                    try
+                       OW_D_DAT    := Date(Token(T_JOINTS._DOCUMENT,';',4));
+                    except
+                       OW_D_DAT    :=Clear(now) ;
+                    end;
+                    OW_D_PLACE     := Token(T_JOINTS._DOCUMENT,';',6);
+                else
+                   OW_D_TYPE      := Clear(0);
+                   OW_IS_NERES    := 0;
+                end;
+                //AdrTp 1 =ПАРТАД   2= Plain  3  обобщенный адрес
+                //       S :=     PARTAD_COUNTRY +'@'+PARTAD_INDEX +'@'+PARTAD_ADDRESS;
+                if not IsBlank(T_JOINTS._AdrTp) then
+                    try
+                        if int(T_JOINTS._AdrTp) = 1 then
+                           OW_HOME_ADR:=Token(T_JOINTS._Addr,'@',3);
+                        elsif int(T_JOINTS._AdrTp) = 2 then
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        else
+                           OW_HOME_ADR:=T_JOINTS._Addr;
+                        end;
+                    except
+                       OW_HOME_ADR:= '';
+                    end;
+                end;
+
+                try
+                 // Используем поле A_TYPE в OD_EXT_FACES
+                 // A_TYPE = 1 =Владелей
+                 // A_TYPE = 2 = совладелец
+                 // A_TYPE = 3 = Бенефициар
+                   ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+
+                   if shareholder_postal_name <>  OW_NAME then
+
+                       ExecSQL('Данные', [insert into OD_EXT_FACES (
+                       ID, DOC, S_TYPE, NAME, DATE_BIRTH,
+                       DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,
+                       HOME_ADR, A_TYPE , A_DUTY , A_RELATION, A_POWER
+                       ) values(
+                       :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH,
+                       :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,
+                       :HOME_ADR, :A_TYPE, :A_DUTY, :A_RELATION, :A_POWER)],
+
+                       ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH,
+                       OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+                       OW_HOME_ADR, 2, PREF+shareholder_id+'_'+str(JOINT_NUM) ,MAIN_OWNER_ID, %A_POWER);
+
+                   end;
+
+                    FV_LIST := List();
+                    ListAdd(FV_LIST, 'EXT_FACE_='+str(MAIN_OWNER_ID));
+                    ListAdd(FV_LIST, 'OWNERID='+ PREF+shareholder_id );
+                    DOL_3 :=_F_BUX_OP-> GET_DOL_BY_LIST(%DOC_ID, 3{%FOOTER}, FV_LIST);
+
+                    LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_4), 4);
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_RAZDEL_4', str(%ACCOUNT_NUMBER) );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'BENEF_ID', PREF+shareholder_id+'_'+str(JOINT_NUM));
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_4', str(ID) );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'DOL3', DOL_3 );
+                   _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERSHIP_RATIO', ownership_ratio );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_CODE', party_account_type_code );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_NARR', party_account_type_narrative );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_KEEPING_PLACE_ID', skp_ID );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_TYPE_CODE', skp_id_type );
+                    _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_NARRATIVE', skp_narrative );
+                except
+                  Info:= _f_report->Add_Info(Info,Exception.Text); ;
+                  _Metal_F->XML_Close;
+                  raise(Info);
+                end;
+            end;
+           T_JOINTS.@Next;
+        end; // while not T_JOINTS.@Eof
+    else
+     //     владельцы
+    //================================================================================
+            OW_S_TYPE      := Is_U;// Int(ListVal(FaceParamList,'ISUR'));
+            OW_NAME        := ListVal(FaceParamList,'FACENAME');
+            if not IsBlank(DATE_BIRTH) then
+               OW_DATE_BIRTH  :=  DATE_BIRTH;
+            else
+               OW_DATE_BIRTH  :=  Clear(now);
+            end;
+            // Из BANK_PROP_RUB!?
+            if not IsBlank(inn) then
+                OW_INN         := inn;
+            else
+                OW_INN := clear('');
+            end;
+            OW_D_TYPE      := Int(ListVal(FaceParamList,'DOC_TYPE'));
+            OW_D_SER       := ListVal(FaceParamList,'DOC_SER');
+            OW_D_NUM       := ListVal(FaceParamList,'DOC_NUM');
+            try
+               SS          := ListVal(FaceParamList,'DOC_DAT');
+               if not IsBlank(SS) then
+                  OW_D_DAT    := Date(SS);
+               else
+                  OW_D_DAT    :=Clear(now) ;
+               end;
+            except
+                  OW_D_DAT    :=Clear(now) ;
+            end;
+            OW_D_PLACE     := ListVal(FaceParamList,'DOC_PLACE');
+
+            OW_MAIL_ADR    := MAIL_ADR;
+
+            OW_HOME_ADR    := ListVal(FaceParamList,'ADDRESS');
+            OW_PHONE := '';
+
+           JJ := ListCount(PhoneList);
+           II := 0;
+           while II < JJ-1 do
+               S := ListGet(PhoneList,II);
+               S1 := Token(S,';',1);
+               S2 := Token(S,';',2);
+               if S2 = 'HOME' then
+                  OW_PHONE       := OW_PHONE + 'дом. ' +S1 + '; ';
+               elsif S2 = 'BIZZ' then
+                  OW_PHONE       :=   OW_PHONE +'офф.: ' +S1 + '; ';
+               elsif S2 = 'MOBI' then
+                 OW_PHONE       :=   OW_PHONE +'моб.: ' + S1 + '; ';
+               elsif S2 = 'FAXI' then
+                 OW_FAX         :=   S1;
+               else
+                  dummy;
+               end;
+               INC(II);
+           end;
+           JJ := ListCount(EMail_List);
+           OW_EMAIL :='';
+           II := 0;
+           while II < JJ-1 do
+              OW_EMAIL :=OW_EMAIL + ListGet(EMail_List,II) + ' ; ';
+              INC(II);
+           end;
+
+            if int(TAX_STATUS_CODE = 1) then
+               OW_IS_NERES    := 0;
+            else
+               OW_IS_NERES    := 1;
+            end;
+
+            B_BIC          :=  BANK_BIC;
+            B_NAME         :=  BANK_NAME;
+            B_KORR         :=  BANK_KORR;
+            B_CITY         :=  BANK_CITY;
+            B_DEPT         := '';
+            B_DEPT_AC      :=  '';
+            // -----
+            DOP_INFO       := PAY_ADD_INFO;
+            // -----
+            OW_HOME_KLADR  := '';
+            OW_MAIL_KLADR  := '';
+            OW_B_P_INN     := P_INN;//????????????????????????
+            OW_B_P_NAME    := PAY_NAME;
+            OW_B_P_ACNT    := ACC_RS;
+            OW_OGRN        := ListVal(FaceParamList,'OGRN');
+            if Length(OW_OGRN) > 15 then
+                 OW_OGRN := 'Нет данных';
+            end;
+            if not IsBlank(ListVal(FaceParamList,'OGRN_DATE')) then
+               OW_OGRN_D := date(ListVal(FaceParamList,'OGRN_DATE'));
+            else
+               OW_OGRN_D := Clear(now);
+            end;
+            OW_OGRN_P      := ListVal(FaceParamList,'OGRN_PLACE');
+
+      if ~IsBlank(Info) then
+         if ~%mute then
+            Warning('При разборе текста сообщения (в резделе списка владельцев), владелец '+ OW_NAME+ ' сформирован список ошибок/предупреждений:'+#13+#10+Info);
+         end;
+         _Metal_F->XML_Close;
+         raise ('Ошибки при разборе описания владельца '+ OW_NAME);
+      end;
+
+        if IsNull(OW_INN)     then        OW_INN:='';        end;
+        if IsNull(OW_FAX)     then        OW_FAX:='';        end;
+        if IsNull(B_BIC)      then        B_BIC:='';         end;
+        if IsNull(B_CITY)     then        B_CITY:='';        end;
+        if IsNull(B_NAME)     then        B_NAME:='';        end;
+        if IsNull(B_KORR)     then        B_KORR:='';        end;
+        if IsNull(B_DEPT_AC)  then        B_DEPT_AC:='';     end;
+        if IsNull(OW_B_P_INN) then        OW_B_P_INN:='';    end;
+        if IsNull(OW_B_P_NAME)then        OW_B_P_NAME:='';   end;
+        if IsNull(OW_B_P_ACNT)then        OW_B_P_ACNT:='';   end;
+        if IsNull(DOP_INFO)   then        DOP_INFO:='';      end;
+        if IsNull(OW_MAIL_ADR)   then     OW_MAIL_ADR:='';   end;
+       // if IsNull(OW_OGRN_D)  then       date('16.01.1900');  end;
+
+      try
+       // Используем поле A_TYPE в OD_EXT_FACES      PUBMODE Спросить!!!!! NOT NULL!!!???
+       // A_TYPE = 1 =Владелей
+       // A_TYPE = 2 = совладелец
+       // A_TYPE = 3 = Бенефициар
+             ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+             MAIN_OWNER_ID :=ID;
+             ExecSQL('Данные', [insert into OD_EXT_FACES (
+             ID, DOC, S_TYPE, NAME, DATE_BIRTH, INN,
+             DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,
+             MAIL_ADR, HOME_ADR, PHONE, FAX, EMAIL, STATE, IS_NERES,
+             BANK_BIC, BANK_NAME, BANK_KORR, BANK_CITY, BANK_DEPART, BANK_DEPART_ACNT,
+             BANK_P_INN, BANK_P_NAME, BANK_P_ACNT,
+             HOME_KLADR, MAIL_KLADR,
+             OGRN, OGRN_DATE, OGRN_PLACE,
+             DOP_INFO, A_TYPE , A_DUTY, A_RELATION, A_POWER
+             ) values(
+             :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH, :INN,
+             :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,
+             :MAIL_ADR, :HOME_ADR, :PHONE, :FAX, :EMAIL, :STATE, :IS_NERES,
+             :BANK_BIC, :BANK_NAME, :BANK_KORR, :BANK_CITY, :BANK_DEPART, :BANK_DEPART_ACNT,
+             :BANK_P_INN, :BANK_P_NAME, :BANK_P_ACNT,
+             :HOME_KLADR, :MAIL_KLADR,
+             :OGRN, :OGRN_DATE, :OGRN_PLACE,
+             :DOP_INFO,:A_TYPE , :A_DUTY, :A_RELATION, :A_POWER)],
+
+             ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN,
+             OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+             OW_MAIL_ADR,OW_HOME_ADR, OW_PHONE, OW_FAX, OW_EMAIL,iif(OW_IS_NERES =1,'', '643'),OW_IS_NERES,
+             B_BIC, B_NAME, B_KORR, B_CITY,  B_DEPT, B_DEPT_AC,
+             OW_B_P_INN, OW_B_P_NAME, OW_B_P_ACNT,
+             OW_HOME_KLADR, OW_MAIL_KLADR,
+             OW_OGRN, OW_OGRN_D, OW_OGRN_P,
+             DOP_INFO, 1 , PREF+shareholder_id, MAIN_OWNER_ID, %A_POWER );
+      except
+         Info := _f_report-> Add_Info(Info,Exception.Text);
+        _Metal_F->XML_Close;
+        raise(Info);
+      end;
+
+      //================================================================================
+       if %ds.?security_balance then
+           x_security_balance := %ds._security_balance;
+           while not x_security_balance.@Eof do
+           _F_NXML2->Inp_Security_balance_t_v03 (x_security_balance,  Way,   SHARE, TOTAL,  NARRATIVE, BLOCK_COUNT, FaceParamList, Sec_InfoList, PawnerList,InfoFrom);
+                //            ACC_NUMBER, ACC_TYPE - Раскрываемый счет
+                //            account_id, account_type  -счет владельца
+                LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_3), 3);
+               if APPLICATION = 'REESTR' then
+
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_DEPO', ACCOUNT_ID_ );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERID', shareholder_id );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_', str(ID) );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'PLEDGE', str(BLOCK_COUNT) );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'AMOUNT_', str(TOTAL) );  //  ??
+               else
+                  // Запись строки в третий подвал
+
+                  _f_report->GetShare(SHARE);
+                  SEC_Code := _f_report.GetShare.SYSNAME;
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_DEPO', ACCOUNT_ID_ );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERID', PREF+shareholder_id );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_', str(ID) );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'PLEDGE', str(BLOCK_COUNT) );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'SHARE_ID_', SHARE );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'AMOUNT_', str(TOTAL) );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_ID_3', skp_ID );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_TYPE_CODE_3', skp_id_type );
+                  _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_NARRATIVE_3', skp_narrative );
+
+               end;
+               Info := _f_report->Add_Info(Info,InfoFrom);
+               x_security_balance.@Next;
+           end;
+       end;
+    end;
+   // БЕНЕФИЦИАРЫ  !!!!!!!!!!!!!!!
+   if %ds.?beneficiary then
+      x_beneficiary := %ds._beneficiary;
+      if x_beneficiary.?beneficiaries then
+          Way:=_F_NXML2->Add_Way(%Way, 'beneficiary');
+
+         x_beneficiaries := x_beneficiary._beneficiaries;
+         while not x_beneficiaries.@Eof do
+              TableClear(U_DOCS);
+              TableClear(F_DOCS);
+              TableClear(SecRestTable);
+              AccountInfoList := List();
+
+              //AccountInfoList:
+              //party_account_type_code=
+              // narrative
+              //   account_id
+              //   issuer
+              //   scheme_name
+              //   SKP_ID
+              //   SKP_id_type
+              //   SKP_narrative
+
+             _F_NXML2->Inp_Beneficiaries_t(x_beneficiaries, Way,   U_DOCS, F_DOCS, SecRestTable, Is_U, DOC_FACE, BEN_NAME, AccountInfoList, Sec_InfoList, FaceParamList, JointList, AddInfoList, InfoFrom);
+
+              Info := _f_report->Add_Info(Info,InfoFrom);
+
+              ACCOUNT_TYPE_CODE   :=  ListVAL(AccountInfoList,'account_type_code');
+              ACCOUNT_TYPE_NARR   :=  ListVAL(AccountInfoList,'narrative');
+              S_KEEPING_PLACE_ID  :=  ListVAL(AccountInfoList,'SKP_ID');
+              S_K_P_TYPE_CODE     :=  ListVAL(AccountInfoList,'SKP_id_type');
+              S_K_P_NARRATIVE     :=  ListVAL(AccountInfoList,'SKP_narrative');
+
+
+
+              // %SecRestTable = Table(SHARE:int,TOTAL:float);
+
+              if ListCount(JointList) = 0 then
+
+                    OW_S_TYPE      := Is_U;// Int(ListVal(FaceParamList,'ISUR'));
+
+                    OW_NAME        :=     ListVal(FaceParamList,'FACENAME');
+
+                    OW_D_TYPE      := Int(ListVal(FaceParamList,'DOC_TYPE'));
+
+                    OW_D_SER       :=     ListVal(FaceParamList,'DOC_SER');
+                    if IsNull(OW_D_SER) then OW_D_SER := '' end;
+                    OW_D_NUM       :=     ListVal(FaceParamList,'DOC_NUM');
+                    if IsNull(OW_D_NUM) then OW_D_NUM := '' end;
+                    try
+                       OW_D_DAT    := Date(ListVal(FaceParamList,'DOC_DAT'));
+                    except
+                       OW_D_DAT    :=Clear(now) ;
+                    end;
+                    OW_D_PLACE     := ListVal(FaceParamList,'DOC_PLACE');
+                    if IsNull(OW_D_PLACE) then OW_D_PLACE := '' end;
+
+                    OW_HOME_ADR    := ListVal(FaceParamList,'ADDRESS');
+                    if IsNull(OW_HOME_ADR) then OW_HOME_ADR := '' end;
+                    OW_OGRN        := ListVal(FaceParamList,'OGRN');
+                    if IsNull(OW_OGRN) then OW_OGRN := '' end;
+                    if not IsBlank(ListVal(FaceParamList,'OGRN_DATE')) then
+                       OW_OGRN_D := date(ListVal(FaceParamList,'OGRN_DATE'));
+                    else
+                       OW_OGRN_D := Clear(now);
+                    end;
+                    OW_OGRN_P      := ListVal(FaceParamList,'OGRN_PLACE');
+                    if IsNull(OW_OGRN_P) then OW_OGRN_P := '' end;
+                    if ~IsBlank(Info) then
+                       if ~%mute then
+                          Warning('При разборе текста сообщения (в резделе списка Бенефициаров), владелец '+ OW_NAME+ ' сформирован список ошибок/предупреждений:'+#13+#10+Info);
+                       end;
+                       _Metal_F->XML_Close;
+                       return(100);
+                    end;
+                    try
+                     // Используем поле A_TYPE в OD_EXT_FACES      PUBMODE Спросить!!!!! NOT NULL!!!???
+                     // A_TYPE = 1 =Владелей
+                     // A_TYPE = 2 = совладелец
+                     // A_TYPE = 3 = Бенефициар
+
+
+
+                           ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+
+                           if IsBlank(MAIN_OWNER_ID) then
+                              A_RELATION := ID;
+                           else
+                              A_RELATION := MAIN_OWNER_ID;
+                           end;
+
+                           ExecSQL('Данные', [insert into OD_EXT_FACES (
+                           ID, DOC, S_TYPE, NAME, DATE_BIRTH, INN,
+                           DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,HOME_ADR,
+                           OGRN, OGRN_DATE, OGRN_PLACE,
+                           DOP_INFO, A_TYPE, A_DUTY, A_RELATION, A_POWER
+                           ) values(
+                           :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH, :INN,
+                           :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,:HOME_ADR,
+                           :OGRN, :OGRN_DATE, :OGRN_PLACE,
+                           :DOP_INFO,:A_TYPE,:A_DUTY, :A_RELATION, :A_POWER)],
+
+                           ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN,
+                           OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,OW_HOME_ADR,
+                           OW_OGRN, OW_OGRN_D, OW_OGRN_P,
+                           DOP_INFO, 3 , PREF+shareholder_id, MAIN_OWNER_ID, %A_POWER );
+                    except
+                       Info := _f_report-> AddInfo(Info,Exception.Text);
+                      _Metal_F->XML_Close;
+                      raise(Info);
+                    end;
+
+                   LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_4), 4);
+
+                                  //            ACC_NUMBER, ACC_TYPE - Раскрываемый счет
+                                  //            account_id, account_type  -счет владельца
+                   if APPLICATION = 'REESTR' then
+                      _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_DEPO', str(%ACCOUNT_NUMBER) );
+                      _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERID', shareholder_id );
+                      _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_', str(ID) );
+                      _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'PLEDGE', str(BLOCK_COUNT) );
+                      _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'AMOUNT_', str(TOTAL) );//    ??
+                   else
+
+                      //AccountInfoList:
+                      //party_account_type_code=
+                      // narrative
+                      //   account_id
+                      //   issuer
+                      //   scheme_name
+                      //   SKP_ID
+                      //   SKP_id_type
+                      //   SKP_narrative
+
+                      SecRestTable.@First;
+
+                      while not SecRestTable.@Eof do
+                          SHARE := SecRestTable._SHARE;
+                          TOTAL := SecRestTable._TOTAL;
+
+
+                         FV_LIST := List();
+
+                          if ~IsBlank(MAIN_OWNER_ID) then
+
+                             ListAdd(FV_LIST, 'EXT_FACE_='+str(MAIN_OWNER_ID));
+                          else
+                              ListAdd(FV_LIST, 'SHARE_ID_='+str(SHARE));
+                              ListAdd(FV_LIST, 'OWNERID='+ PREF+shareholder_id );
+                          end;
+                          DOL_3 :=_F_BUX_OP-> GET_DOL_BY_LIST(%DOC_ID, 3{%FOOTER}, FV_LIST);
+
+                          _f_report->GetShare(SHARE);
+                          SEC_Code := _f_report.GetShare.SYSNAME;
+
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'FOR_INNER_RAZDEL_4', str(%ACCOUNT_NUMBER) );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'BENEF_ID', PREF+shareholder_id );
+                          //У бенефициара не обнаружилось ID
+                          // Может, лучше туда ACCOUNT_ID......
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_4', str(ID) );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'DOL3', DOL_3 );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'SHARE_ID_4', SHARE );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'AMOUNT_4', str(TOTAL) );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_CODE', ACCOUNT_TYPE_CODE );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_NARR', ACCOUNT_TYPE_NARR );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_KEEPING_PLACE_ID', S_KEEPING_PLACE_ID );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_TYPE_CODE', S_K_P_TYPE_CODE );
+                          _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_NARRATIVE', S_K_P_NARRATIVE );
+
+                          SecRestTable.@Next;
+                      end;
+                   end;
+              else // ListCount(JointList > 0)
+
+                  II := int(ListVal(JointList,'jj')); // Число совладелцев бенефициара
+                  JJ := 1;
+
+                  while JJ< II do
+
+                      OW_S_TYPE := 0;
+                      OW_NAME         := ListVal(JointList, Str(JJ)+'_JOINT_NAME');
+                      STATE           := ListVal(JointList, Str(JJ)+'_STATE');
+                      if IsNull(STATE) then STATE := '' end;
+
+                      NATIONALITY     := ListVal(JointList, Str(JJ)+'_NATIONALITY');
+                      if IsNull(NATIONALITY) then NATIONALITY := '' end;
+
+
+                      try
+                         OW_DATE_BIRTH    := Date(ListVal(JointList, Str(JJ)+'_DATE_BIRTH'));
+                      except
+                         OW_DATE_BIRTH    :=Clear(now) ;
+                      end;
+
+
+
+                      BIRTHPLACE      := ListVal(JointList, Str(JJ)+'_BIRTHPLACE');
+                      if IsNull(BIRTHPLACE) then BIRTHPLACE := '' end;
+                      UNKNOWN         := ListVal(JointList, Str(JJ)+'_UNKNOWN');
+                      if IsNull(UNKNOWN) then UNKNOWN := '' end;
+
+                      OW_HOME_ADR     := ListVal(JointList, Str(JJ)+'_ADRTP');
+                      if IsNull(OW_HOME_ADR) then OW_HOME_ADR := '' end;
+                      OWNERSHIP_RATIO := ListVal(JointList, Str(JJ)+'_OWNERSHIP_RATIO');
+                      if IsNull(OWNERSHIP_RATIO) then OWNERSHIP_RATIO := '' end;
+                      PENSNUM         := ListVal(JointList, Str(JJ)+'_PENSNUM');
+                      if IsNull(PENSNUM) then PENSNUM := '' end;
+
+                       // Число документов у совладельца JJ
+                       KK := int(ListVal(JointList,str(JJ)+'_NN'));
+                       NN := 1;
+                       // Возьму только один, скорей всего, он один и будет. Все равно второй деть некуда.
+                       // Или есть куда?
+                       while NN < KK  do
+                          OW_D_TYPE   := ListVal(JointList, Str(JJ)+'_'+Str(NN)+'_DOC_TYPE');
+                          OW_D_NUM    := ListVal(JointList, Str(JJ)+'_'+Str(NN)+'_DOC_NUM');
+                          OW_D_SER    := ListVal(JointList, Str(JJ)+'_'+Str(NN)+'_DOC_SER');
+                          OW_D_DAT    := ListVal(JointList, Str(JJ)+'_'+Str(NN)+'_DOC_DAT');
+                          OW_D_PLACE  := ListVal(JointList, Str(JJ)+'_'+Str(NN)+'_DOC_PLACE');
+
+                          INC(NN);
+                       end;
+
+                        DOL_4 := 0;
+
+                        ID := Gen_ID('Данные', 'OD_FACES_ID_GEN', 1);
+
+                        ExecSQL('Данные', [insert into OD_EXT_FACES (
+                        ID, DOC, S_TYPE, NAME, DATE_BIRTH,
+                        DOC_TYPE, DOC_SER, DOC_NUM, DOC_DAT, DOC_PLACE,
+                        HOME_ADR, A_TYPE , A_DUTY, A_RELATION, A_POWER
+                        ) values(
+                        :ID, :DOC, :S_TYPE, :NAME, :DATE_BIRTH,
+                        :DOC_TYPE, :DOC_SER, :DOC_NUM, :DOC_DAT, :DOC_PLACE,
+                        :HOME_ADR, :A_TYPE, :A_DUTY, :A_RELATION, :A_POWER)],
+                        ID, %doc_id, OW_S_TYPE, OW_NAME, OW_DATE_BIRTH, OW_INN,
+                        OW_D_TYPE, OW_D_SER, OW_D_NUM, OW_D_DAT, OW_D_PLACE,
+                        OW_HOME_ADR, 2, PREF+shareholder_id+'_'+str(JJ),MAIN_OWNER_ID, %A_POWER );
+
+                        LINE := _f_bux_op->CREATE_OP_LINE_FULL( %doc_id, Inc(START_NUM_4), 4);
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'BENEF_ID', PREF+shareholder_id+'_'+str(JJ) );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'EXT_FACE_4', str(ID) );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'OWNERSHIP_RATIO', OWNERSHIP_RATIO );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'DOL4', DOL_4 );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_CODE', ACCOUNT_TYPE_CODE );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'ACCOUNT_TYPE_NARR', ACCOUNT_TYPE_NARR );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_KEEPING_PLACE_ID', S_KEEPING_PLACE_ID );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_TYPE_CODE', S_K_P_TYPE_CODE );
+                        _f_bux_op->MODIFY_OP_VAL_LINE( %doc_id, LINE, 'S_K_P_NARRATIVE', S_K_P_NARRATIVE );
+
+                      INC(JJ);
+                  end;
+
+              end;
+             x_beneficiaries.@Next;
+         end;
+      else
+         if x_beneficiary.?attch then
+            x_attch := x_beneficiary.?attch;
+            while not x_attch.@Eof do
+                 file_name := x_attch._file_name;
+                 file_contents := x_attch._file_contents;
+                 x_attch.@Next;
+            end;
+         end;
+      end;
+   end;
